@@ -204,8 +204,8 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: tensors')
 
   def do_tensors(self, arg):
-    for name in self._all_vars():
-      print(name)
+    for name, shape in tf.contrib.framework.list_variables(self._checkpoint):
+      print('{} : [{}]'.format(name, 'x'.join(map(str, shape))))
 
   def help_cd(self):
     print('cd - change directory.')
