@@ -205,7 +205,7 @@ class ExplorerShell(cmd.Cmd):
 
   def do_tensors(self, arg):
     for name, shape in tf.contrib.framework.list_variables(self._checkpoint):
-      print('{} : [{}]'.format(name, 'x'.join(map(str, shape))))
+      print('{} : [{}]'.format(name, ', '.join(map(str, shape))))
 
   def help_cd(self):
     print('cd - change directory.')
@@ -248,6 +248,32 @@ class ExplorerShell(cmd.Cmd):
 
   def do_pwd(self, arg):
     print('/{}'.format(self._cwd.full_name))
+
+  def help_shape(self):
+    print('shape - print shape of tensor to console.')
+    print('Syntax: shape TENSOR')
+
+  def complete_shape(self, text, line, begidx, endidx):
+    return self.complete_cat(text, line, begidx, endidx)
+
+  def do_shape(self, arg):
+    arg = arg.split()
+    if len(arg) != 1:
+      print('shape: invalid usage.')
+      return
+    target = self._cwd.find(arg[0])
+    if target is None:
+      print('{}: not found.'.format(arg[0]))
+    elif not target.is_terminal:
+      print('{}: not a tensor.'.format(arg[0]))
+    else:
+      # If the tensor was renamed but not committed, find the original name so we can look it up
+      # in the checkpoint file.
+      name = target.full_name
+      for k, v in reversed(self._mutations):
+        if v == name:
+          name = k
+      print(list(tf.contrib.framework.load_variable(self._checkpoint, name).shape))
 
   def help_cat(self):
     print('cat - print tensor to console.')
