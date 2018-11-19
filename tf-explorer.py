@@ -340,6 +340,41 @@ class ExplorerShell(cmd.Cmd):
       except Exception as e:
         print(str(e))
 
+  def help_load(self):
+    print('load - loads a numpy tensor from disk into the current checkpoint.')
+    print('Syntax: load TENSOR FILENAME')
+
+  def do_load(self, arg):
+    if len(self._mutations) > 0:
+      print('load: cannot load a variable while mutations are still pending.')
+      return
+    arg = arg.split()
+    if len(arg) != 2:
+      print('load: invalid usage.')
+      return
+    target = self._cwd.find(arg[0])
+    if target is None:
+      print('{}: not found.'.format(arg[0]))
+    elif not target.is_terminal:
+      print('{}: not a tensor.'.format(arg[0]))
+    else:
+      replace_name = target.full_name
+      try:
+        replace_value = np.load(arg[1], allow_pickle=False)
+      except Exception as e:
+        print(str(e))
+        return
+      tf.reset_default_graph()
+      with tf.Session() as session:
+        for name in self._all_vars():
+          if name == replace_name:
+            value = replace_value
+          else:
+            value = tf.contrib.framework.load_variable(self._checkpoint, name)
+          var = tf.Variable(value, name=name)
+        session.run(tf.global_variables_initializer())
+        tf.train.Saver().save(session, self._checkpoint)
+
   def help_mv(self):
     print('mv - move/rename tensor or directory.')
     print('Syntax: mv SRC DEST')
