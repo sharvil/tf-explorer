@@ -154,7 +154,8 @@ class ExplorerShell(cmd.Cmd):
     self._root = self._build_tree(self._all_vars())
     self._cwd = self._root
     self._prevwd = '/'
-    self._mutations = []
+    self._renames = []
+    self._loads = {}
 
   def help_ls(self):
     print('ls - lists directory contents.')
@@ -270,7 +271,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._mutations):
+      for k, v in reversed(self._renames):
         if v == name:
           name = k
       print(list(tf.contrib.framework.load_variable(self._checkpoint, name).shape))
@@ -308,7 +309,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._mutations):
+      for k, v in reversed(self._renames):
         if v == name:
           name = k
       print(tf.contrib.framework.load_variable(self._checkpoint, name))
@@ -331,7 +332,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._mutations):
+      for k, v in reversed(self._renames):
         if v == name:
           name = k
       tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
@@ -343,11 +344,9 @@ class ExplorerShell(cmd.Cmd):
   def help_load(self):
     print('load - loads a numpy tensor from disk into the current checkpoint.')
     print('Syntax: load TENSOR FILENAME')
+    print('Note: the operation is performed in-memory. To write changes back to the checkpoint, run `commit` after `load`.')
 
   def do_load(self, arg):
-    if len(self._mutations) > 0:
-      print('load: cannot load a variable while mutations are still pending.')
-      return
     arg = arg.split()
     if len(arg) != 2:
       print('load: invalid usage.')
@@ -358,22 +357,13 @@ class ExplorerShell(cmd.Cmd):
     elif not target.is_terminal:
       print('{}: not a tensor.'.format(arg[0]))
     else:
-      replace_name = target.full_name
+      name = target.full_name
       try:
-        replace_value = np.load(arg[1], allow_pickle=False)
+        value = np.load(arg[1], allow_pickle=False)
       except Exception as e:
         print(str(e))
         return
-      tf.reset_default_graph()
-      with tf.Session() as session:
-        for name in self._all_vars():
-          if name == replace_name:
-            value = replace_value
-          else:
-            value = tf.contrib.framework.load_variable(self._checkpoint, name)
-          var = tf.Variable(value, name=name)
-        session.run(tf.global_variables_initializer())
-        tf.train.Saver().save(session, self._checkpoint)
+      self._loads[name] = value
 
   def help_mv(self):
     print('mv - move/rename tensor or directory.')
@@ -392,17 +382,23 @@ class ExplorerShell(cmd.Cmd):
       return
     mutations = self._cwd.move(src, dest)
     if mutations is not None:
-      self._mutations += mutations
+      self._renames += mutations
+      # Rename pending loads if needed.
+      for old_name, new_name in mutations:
+        if old_name in self._loads:
+          self._loads[new_name] = self._loads.pop(old_name)
     else:
       print('mv: cannot relink {} to {}'.format(arg[0], arg[1]))
 
   def help_mutations(self):
-    print('mutations - list all in-memory move/rename operations that have not been written to disk yet.')
+    print('mutations - list all in-memory move/rename/load operations that have not been written to disk yet.')
     print('Syntax: mutations')
 
   def do_mutations(self, arg):
-    for src, dest in self._mutations:
-      print('{} -> {}'.format(src, dest))
+    for src, dest in self._renames:
+      print('[Rename] {} -> {}'.format(src, dest))
+    for key, _ in sorted(self._loads.items()):
+      print('[Load] {}'.format(key))
 
   def help_commit(self):
     print('commit - writes all pending mutations to the checkpoint.')
@@ -410,17 +406,19 @@ class ExplorerShell(cmd.Cmd):
 
   def do_commit(self, arg):
     '''Commits all pending changes to the checkpoint.'''
-    if len(self._mutations) == 0:
+    if not self._dirty:
       print('Nothing to commit.')
       return
 
-    def commit(replacements):
+    def commit(replacements, loads):
       tf.reset_default_graph()
       with tf.Session() as session:
         for name in self._all_vars():
-          var = tf.contrib.framework.load_variable(self._checkpoint, name)
+          if name in loads:
+            var = loads[name]
+          else:
+            var = tf.contrib.framework.load_variable(self._checkpoint, name)
           if name in replacements:
-            print('Replaced {} with {}'.format(name, replacements[name]))
             name = replacements[name]
           var = tf.Variable(var, name=name)
         session.run(tf.global_variables_initializer())
@@ -428,18 +426,19 @@ class ExplorerShell(cmd.Cmd):
 
     seen = set()
     replacements = {}
-    while len(self._mutations) > 0:
-      k, v = self._mutations.pop(0)
+    while len(self._renames) > 0:
+      k, v = self._renames.pop(0)
       if k in seen:
-        commit(replacements)
+        commit(replacements, {})
         seen = set([v])
         replacements = {k: v}
       else:
         replacements[k] = v
         seen.add(v)
 
-    if len(replacements) > 0:
-      commit(replacements)
+    if len(replacements) > 0 or len(self._loads) > 0:
+      commit(replacements, self._loads)
+    self._loads = {}
 
   def help_exit(self):
     print('exit - exits the shell.')
@@ -454,7 +453,7 @@ class ExplorerShell(cmd.Cmd):
 
   def do_EOF(self, arg):
     print('exit')
-    if len(self._mutations) > 0:
+    if self._dirty:
       print('WARNING: there are pending mutations that have not been written to disk. Discard (y/N)? ', end='', flush=True)
       line = sys.stdin.readline().strip().lower()
       if line == 'y' or line == 'yes':
@@ -474,6 +473,10 @@ class ExplorerShell(cmd.Cmd):
     for name in names:
       root.insert(name, is_terminal=True)
     return root
+
+  @property
+  def _dirty(self):
+    return len(self._renames) > 0 or len(self._loads) > 0
 
 
 if __name__ == '__main__':
