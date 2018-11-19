@@ -154,7 +154,7 @@ class ExplorerShell(cmd.Cmd):
     self._root = self._build_tree(self._all_vars())
     self._cwd = self._root
     self._prevwd = '/'
-    self._renames = []
+    self._renames = {}
     self._loads = {}
 
   def help_ls(self):
@@ -271,9 +271,8 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._renames):
-        if v == name:
-          name = k
+      if name in self._renames:
+        name = self._renames[name]
       print(list(tf.contrib.framework.load_variable(self._checkpoint, name).shape))
 
   def help_cat(self):
@@ -309,9 +308,8 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._renames):
-        if v == name:
-          name = k
+      if name in self._renames:
+        name = self._renames[name]
       print(tf.contrib.framework.load_variable(self._checkpoint, name))
 
   def help_save(self):
@@ -332,9 +330,8 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      for k, v in reversed(self._renames):
-        if v == name:
-          name = k
+      if name in self._renames:
+        name = self._renames[name]
       tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
       try:
         np.save(arg[1], tensor, allow_pickle=False)
@@ -370,6 +367,13 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: mv SRC DEST')
     print('Note: the operation is performed in-memory. To write changes back to the checkpoint, run `commit` after `mv`.')
 
+  def _add_or_update(self, old_name, new_name):
+    for k, v in self._renames.items():
+      if v == old_name:
+        self._renames[k] = new_name
+        return
+    self._renames[old_name] = new_name
+
   def do_mv(self, arg):
     arg = arg.split()
     if len(arg) != 2:
@@ -382,9 +386,9 @@ class ExplorerShell(cmd.Cmd):
       return
     mutations = self._cwd.move(src, dest)
     if mutations is not None:
-      self._renames += mutations
       # Rename pending loads if needed.
       for old_name, new_name in mutations:
+        self._add_or_update(old_name, new_name)
         if old_name in self._loads:
           self._loads[new_name] = self._loads.pop(old_name)
     else:
@@ -395,7 +399,7 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: mutations')
 
   def do_mutations(self, arg):
-    for src, dest in self._renames:
+    for src, dest in sorted(self._renames.items()):
       print('[Rename] {} -> {}'.format(src, dest))
     for key, _ in sorted(self._loads.items()):
       print('[Load] {}'.format(key))
@@ -424,20 +428,8 @@ class ExplorerShell(cmd.Cmd):
         session.run(tf.global_variables_initializer())
         tf.train.Saver().save(session, self._checkpoint)
 
-    seen = set()
-    replacements = {}
-    while len(self._renames) > 0:
-      k, v = self._renames.pop(0)
-      if k in seen:
-        commit(replacements, {})
-        seen = set([v])
-        replacements = {k: v}
-      else:
-        replacements[k] = v
-        seen.add(v)
-
-    if len(replacements) > 0 or len(self._loads) > 0:
-      commit(replacements, self._loads)
+    commit(self._renames, self._loads)
+    self._renames = {}
     self._loads = {}
 
   def help_exit(self):
