@@ -416,16 +416,15 @@ class ExplorerShell(cmd.Cmd):
 
     def commit(replacements):
       tf.reset_default_graph()
-      session = tf.Session()
-      for name in self._all_vars():
-        var = tf.contrib.framework.load_variable(self._checkpoint, name)
-        if name in replacements:
-          print('Replaced {} with {}'.format(name, replacements[name]))
-          name = replacements[name]
-        var = tf.Variable(var, name=name)
-      saver = tf.train.Saver()
-      session.run(tf.global_variables_initializer())
-      saver.save(session, self._checkpoint)
+      with tf.Session() as session:
+        for name in self._all_vars():
+          var = tf.contrib.framework.load_variable(self._checkpoint, name)
+          if name in replacements:
+            print('Replaced {} with {}'.format(name, replacements[name]))
+            name = replacements[name]
+          var = tf.Variable(var, name=name)
+        session.run(tf.global_variables_initializer())
+        tf.train.Saver().save(session, self._checkpoint)
 
     seen = set()
     replacements = {}
