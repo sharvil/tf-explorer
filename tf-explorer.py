@@ -62,6 +62,16 @@ class Node:
         return None
     return node
 
+  def find_terminal_nodes(self):
+    all_terminal_nodes = []
+    to_visit = [self]
+    while len(to_visit) > 0:
+      node = to_visit.pop(0)
+      if node.is_terminal:
+        all_terminal_nodes.append(node)
+      to_visit += node.children
+    return all_terminal_nodes
+
   def move(self, src, dest):
     def find_terminal_names(node):
       ret = []
@@ -274,6 +284,34 @@ class ExplorerShell(cmd.Cmd):
       if name in self._renames:
         name = self._renames[name]
       print(list(tf.contrib.framework.load_variable(self._checkpoint, name).shape))
+
+  def help_parameters(self):
+    print('parameters - print the number of training parameters under a scope.')
+    print('Syntax: parameters [PATH]')
+    print('Note: the parameter count excludes `Adam` optimizer variables.')
+
+  def complete_parameters(self, text, line, begidx, endidx):
+    return self.complete_cat(text, line, begidx, endidx)
+
+  def do_parameters(self, arg):
+    arg = arg.split()
+    if len(arg) > 1:
+      print('parameters: invalid usage.')
+    if len(arg) == 0:
+      target = self._cwd
+    else:
+      target = self._cwd.find(arg[0])
+      if target is None:
+        print('{}: not found.'.format(arg[0]))
+        return
+    target_names = [node.full_name for node in target.find_terminal_nodes()]
+    reader = tf.train.load_checkpoint(self._checkpoint)
+    var_shape_map = reader.get_variable_to_shape_map()
+    count = 0
+    for name in var_shape_map:
+      if 'Adam' not in name and name in target_names:
+        count += int(np.prod(var_shape_map[name]))
+    print('{:,} parameters.'.format(count))
 
   def help_cat(self):
     print('cat - print tensor to console.')
