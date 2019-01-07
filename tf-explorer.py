@@ -348,7 +348,11 @@ class ExplorerShell(cmd.Cmd):
       name = target.full_name
       if name in self._renames:
         name = self._renames[name]
-      print(tf.contrib.framework.load_variable(self._checkpoint, name))
+      value = tf.contrib.framework.load_variable(self._checkpoint, name)
+      if isinstance(value, bytes):
+        print(value.decode())
+      else:
+        print(value)
 
   def help_save(self):
     print('save - save tensor to disk as numpy array.')
