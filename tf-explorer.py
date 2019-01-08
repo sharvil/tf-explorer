@@ -477,7 +477,7 @@ class ExplorerShell(cmd.Cmd):
         for name, value in loads.items():
           var = tf.Variable(value, name=name)
         session.run(tf.global_variables_initializer())
-        tf.train.Saver().save(session, self._checkpoint)
+        tf.train.Saver().save(session, self._checkpoint, write_meta_graph=False, write_state=False)
 
     commit(self._renames, self._loads)
     self._renames = {}
