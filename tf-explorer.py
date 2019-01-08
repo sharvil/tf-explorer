@@ -488,7 +488,7 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: exit')
 
   def do_exit(self, arg):
-    self.do_EOF(self, arg)
+    self.do_EOF(arg)
 
   def help_EOF(self):
     print('^D - exits the shell.')
