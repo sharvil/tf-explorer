@@ -488,14 +488,15 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: exit')
 
   def do_exit(self, arg):
-    self.do_EOF(arg)
+    return self.do_EOF(1)
 
   def help_EOF(self):
     print('^D - exits the shell.')
     print('Syntax: ^D')
 
   def do_EOF(self, arg):
-    print('exit')
+    if not arg:
+      print('exit')
     if self._dirty:
       print('WARNING: there are pending mutations that have not been written to disk. Discard (y/N)? ', end='', flush=True)
       line = sys.stdin.readline().strip().lower()
