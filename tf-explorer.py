@@ -346,9 +346,15 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      if name in self._renames:
-        name = self._renames[name]
-      value = tf.contrib.framework.load_variable(self._checkpoint, name)
+      if name in self._loads:
+        value = self._loads[name]
+        # If numpy byte string, convert to a decoded Python string for printing.
+        if value.dtype.kind == 'S':
+          value = value.tostring().decode()
+      else:
+        if name in self._renames:
+          name = self._renames[name]
+        value = tf.contrib.framework.load_variable(self._checkpoint, name)
       if isinstance(value, bytes):
         print(value.decode())
       else:
@@ -390,19 +396,18 @@ class ExplorerShell(cmd.Cmd):
     if len(arg) != 2:
       print('load: invalid usage.')
       return
+    try:
+      value = np.load(arg[1], allow_pickle=False)
+    except Exception as e:
+      print(str(e))
+      return
     target = self._cwd.find(arg[0])
     if target is None:
-      print('{}: not found.'.format(arg[0]))
+      target = self._cwd.insert(arg[0], is_terminal=True)
     elif not target.is_terminal:
-      print('{}: not a tensor.'.format(arg[0]))
-    else:
-      name = target.full_name
-      try:
-        value = np.load(arg[1], allow_pickle=False)
-      except Exception as e:
-        print(str(e))
-        return
-      self._loads[name] = value
+      target.is_terminal = True
+    name = target.full_name
+    self._loads[name] = value
 
   def help_mv(self):
     print('mv - move/rename tensor or directory.')
@@ -462,11 +467,15 @@ class ExplorerShell(cmd.Cmd):
         for name in self._all_vars():
           if name in loads:
             var = loads[name]
+            loads.pop(name)
           else:
             var = tf.contrib.framework.load_variable(self._checkpoint, name)
           if name in replacements:
             name = replacements[name]
           var = tf.Variable(var, name=name)
+        # Add new variables to checkpoint if they didn't exist before.
+        for name, value in loads.items():
+          var = tf.Variable(value, name=name)
         session.run(tf.global_variables_initializer())
         tf.train.Saver().save(session, self._checkpoint)
 
