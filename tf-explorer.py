@@ -4,6 +4,7 @@ import cmd
 import getopt
 import numpy as np
 import os
+import re
 import sys
 
 
@@ -457,14 +458,22 @@ class ExplorerShell(cmd.Cmd):
 
   def do_commit(self, arg):
     '''Commits all pending changes to the checkpoint.'''
-    if not self._dirty:
+
+    all_vars = self._all_vars()
+    needs_repair = False
+
+    # TODO: add documentation for repair argument.
+    if '--repair' in arg.split():
+      needs_repair = True in ['//' in name for name in all_vars]
+
+    if not self._dirty and not needs_repair:
       print('Nothing to commit.')
       return
 
     def commit(replacements, loads):
       tf.reset_default_graph()
       with tf.Session() as session:
-        for name in self._all_vars():
+        for name in all_vars:
           if name in loads:
             var = loads[name]
             loads.pop(name)
@@ -472,6 +481,8 @@ class ExplorerShell(cmd.Cmd):
             var = tf.contrib.framework.load_variable(self._checkpoint, name)
           if name in replacements:
             name = replacements[name]
+          if needs_repair and '//' in name:
+            name = re.sub(r'/+', r'/', name)
           var = tf.Variable(var, name=name)
         # Add new variables to checkpoint if they didn't exist before.
         for name, value in loads.items():
