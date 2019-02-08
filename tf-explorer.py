@@ -281,10 +281,12 @@ class ExplorerShell(cmd.Cmd):
     else:
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
-      name = target.full_name
-      if name in self._renames:
-        name = self._renames[name]
-      print(list(tf.contrib.framework.load_variable(self._checkpoint, name).shape))
+      name = self._original_name(target.full_name)
+      tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
+      if isinstance(tensor, bytes):
+        print('[]')
+      else:
+        print(list(tensor.shape))
 
   def help_parameters(self):
     print('parameters - print the number of training parameters under a scope.')
@@ -353,9 +355,7 @@ class ExplorerShell(cmd.Cmd):
         if value.dtype.kind == 'S':
           value = value.tostring().decode()
       else:
-        if name in self._renames:
-          name = self._renames[name]
-        value = tf.contrib.framework.load_variable(self._checkpoint, name)
+        value = tf.contrib.framework.load_variable(self._checkpoint, self._original_name(name))
       if isinstance(value, bytes):
         print(value.decode())
       else:
@@ -378,9 +378,7 @@ class ExplorerShell(cmd.Cmd):
     else:
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
-      name = target.full_name
-      if name in self._renames:
-        name = self._renames[name]
+      name = self._original_name(target.full_name)
       tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
       try:
         np.save(arg[1], tensor, allow_pickle=False)
@@ -409,6 +407,31 @@ class ExplorerShell(cmd.Cmd):
       target.is_terminal = True
     name = target.full_name
     self._loads[name] = value
+
+  def help_zero(self):
+    print('zero - zeros out a tensor while retaining its shape.')
+    print('Syntax: zero TENSOR')
+    print('Note: the operation is performed in-memory. To write changes back to the checkpoint, run `commit` after `zero`.')
+
+  def complete_zero(self, text, line, begidx, endidx):
+    return self.complete_cat(text, line, begidx, endidx)
+
+  def do_zero(self, arg):
+    arg = arg.split()
+    if len(arg) != 1:
+      print('zero: invalid usage.')
+      return
+    target = self._cwd.find(arg[0])
+    if target is None:
+      print('{}: not found.'.format(arg[0]))
+    elif not target.is_terminal:
+      print('{}: not a tensor.'.format(arg[0]))
+    else:
+      # If the tensor was renamed but not committed, find the original name so we can look it up
+      # in the checkpoint file.
+      name = target.full_name
+      tensor = tf.contrib.framework.load_variable(self._checkpoint, self._original_name(name))
+      self._loads[name] = np.zeros_like(tensor)
 
   def help_mv(self):
     print('mv - move/rename tensor or directory.')
@@ -474,13 +497,12 @@ class ExplorerShell(cmd.Cmd):
       tf.reset_default_graph()
       with tf.Session() as session:
         for name in all_vars:
+          var = tf.contrib.framework.load_variable(self._checkpoint, name)
+          if name in replacements:
+            name = replacements[name]
           if name in loads:
             var = loads[name]
             loads.pop(name)
-          else:
-            var = tf.contrib.framework.load_variable(self._checkpoint, name)
-          if name in replacements:
-            name = replacements[name]
           if needs_repair and '//' in name:
             name = re.sub(r'/+', r'/', name)
           var = tf.Variable(var, name=name)
@@ -519,6 +541,12 @@ class ExplorerShell(cmd.Cmd):
         return
     print()
     return True
+
+  def _original_name(self, name):
+    for src, dest in self._renames.items():
+      if name == dest:
+        return src
+    return name
 
   def _all_vars(self):
     return [var_name for var_name, _ in tf.contrib.framework.list_variables(self._checkpoint)]
