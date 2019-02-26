@@ -216,7 +216,7 @@ class ExplorerShell(cmd.Cmd):
     print('Syntax: tensors')
 
   def do_tensors(self, arg):
-    for name, shape in tf.contrib.framework.list_variables(self._checkpoint):
+    for name, shape in tf.train.list_variables(self._checkpoint):
       print('{} : [{}]'.format(name, ', '.join(map(str, shape))))
 
   def help_cd(self):
@@ -282,7 +282,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = self._original_name(target.full_name)
-      tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
+      tensor = tf.train.load_variable(self._checkpoint, name)
       if isinstance(tensor, bytes):
         print('[]')
       else:
@@ -355,7 +355,7 @@ class ExplorerShell(cmd.Cmd):
         if value.dtype.kind == 'S':
           value = value.tostring().decode()
       else:
-        value = tf.contrib.framework.load_variable(self._checkpoint, self._original_name(name))
+        value = tf.train.load_variable(self._checkpoint, self._original_name(name))
       if isinstance(value, bytes):
         print(value.decode())
       else:
@@ -379,7 +379,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = self._original_name(target.full_name)
-      tensor = tf.contrib.framework.load_variable(self._checkpoint, name)
+      tensor = tf.train.load_variable(self._checkpoint, name)
       try:
         np.save(arg[1], tensor, allow_pickle=False)
       except Exception as e:
@@ -430,7 +430,7 @@ class ExplorerShell(cmd.Cmd):
       # If the tensor was renamed but not committed, find the original name so we can look it up
       # in the checkpoint file.
       name = target.full_name
-      tensor = tf.contrib.framework.load_variable(self._checkpoint, self._original_name(name))
+      tensor = tf.train.load_variable(self._checkpoint, self._original_name(name))
       self._loads[name] = np.zeros_like(tensor)
 
   def help_mv(self):
@@ -497,7 +497,7 @@ class ExplorerShell(cmd.Cmd):
       tf.reset_default_graph()
       with tf.Session() as session:
         for name in all_vars:
-          var = tf.contrib.framework.load_variable(self._checkpoint, name)
+          var = tf.train.load_variable(self._checkpoint, name)
           if name in replacements:
             name = replacements[name]
           if name in loads:
@@ -549,7 +549,7 @@ class ExplorerShell(cmd.Cmd):
     return name
 
   def _all_vars(self):
-    return [var_name for var_name, _ in tf.contrib.framework.list_variables(self._checkpoint)]
+    return [var_name for var_name, _ in tf.train.list_variables(self._checkpoint)]
 
   def _build_tree(self, names):
     root = Node(None, '', is_terminal=False)
