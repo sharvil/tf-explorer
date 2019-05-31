@@ -5,7 +5,12 @@ import getopt
 import numpy as np
 import os
 import re
+import subprocess
 import sys
+import tempfile
+
+
+EDITOR = os.environ.get('EDITOR', 'vim')
 
 
 class Node:
@@ -432,6 +437,52 @@ class ExplorerShell(cmd.Cmd):
       name = target.full_name
       tensor = tf.train.load_variable(self._checkpoint, self._original_name(name))
       self._loads[name] = np.zeros_like(tensor)
+
+  def help_edit(self):
+    print('edit - launches $EDITOR to allow manual edits to a scalar string tensor.')
+    print('Syntax: edit TENSOR')
+    print('Note: the operation is performed in-memory. To write changes back to the checkpoint, run `commit` after `edit`.')
+
+  def complete_edit(self, text, line, begidx, endidx):
+    return self.complete_cat(text, line, begidx, endidx)
+
+  def do_edit(self, arg):
+    arg = arg.split()
+    if len(arg) != 1:
+      print('edit: invalid usage.')
+      return
+    target = self._cwd.find(arg[0])
+    if target is None:
+      print('{}: not found.'.format(arg[0]))
+    elif not target.is_terminal:
+      print('{}: not a tensor.'.format(arg[0]))
+    else:
+      name = target.full_name
+      if target.full_name in self._loads:
+        tensor = self._loads[name]
+        # If numpy byte string, convert to a decoded Python string.
+        if tensor.dtype.kind == 'S':
+          tensor = tensor.tostring().decode()
+      else:
+        # If the tensor was renamed but not committed, find the original name so we can look it up
+        # in the checkpoint file.
+        tensor = tf.train.load_variable(self._checkpoint, self._original_name(name))
+
+      if not isinstance(tensor, bytes):
+        print('{}: not a string tensor.'.format(arg[0]))
+        return
+
+      with tempfile.NamedTemporaryFile(suffix='.tmp') as fp:
+        fp.write(tensor)
+        fp.flush()
+        ret = subprocess.call([EDITOR, fp.name])
+        if ret == 0:
+          fp.seek(0)
+          new_tensor = fp.read()
+          if new_tensor != tensor:
+            self._loads[name] = np.array(new_tensor)
+        else:
+          print('edit - not storing modifications; editor exited with non-zero status.')
 
   def help_mv(self):
     print('mv - move/rename tensor or directory.')
